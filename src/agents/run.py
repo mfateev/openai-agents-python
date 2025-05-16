@@ -37,6 +37,7 @@ from .models.interface import Model, ModelProvider
 from .models.multi_provider import MultiProvider
 from .result import RunResult, RunResultStreaming
 from .run_context import RunContextWrapper, TContext
+from .side_effects_interceptor import RunInterceptor
 from .stream_events import AgentUpdatedStreamEvent, RawResponsesStreamEvent
 from .tool import Tool
 from .tracing import Span, SpanError, agent_span, get_current_trace, trace
@@ -109,15 +110,15 @@ class RunConfig:
 class Runner:
     @classmethod
     async def run(
-        cls,
-        starting_agent: Agent[TContext],
-        input: str | list[TResponseInputItem],
-        *,
-        context: TContext | None = None,
-        max_turns: int = DEFAULT_MAX_TURNS,
-        hooks: RunHooks[TContext] | None = None,
-        run_config: RunConfig | None = None,
-        previous_response_id: str | None = None,
+            cls,
+            starting_agent: Agent[TContext],
+            input: str | list[TResponseInputItem],
+            *,
+            context: TContext | None = None,
+            max_turns: int = DEFAULT_MAX_TURNS,
+            hooks: RunHooks[TContext] | None = None,
+            run_config: RunConfig | None = None,
+            previous_response_id: str | None = None,
     ) -> RunResult:
         """Run a workflow starting at the given agent. The agent will run in a loop until a final
         output is generated. The loop runs like so:
@@ -149,6 +150,17 @@ class Runner:
             A run result containing all the inputs, guardrail results and the output of the last
             agent. Agents may perform handoffs, so we don't know the specific type of the output.
         """
+        params = RunInterceptor.get().intercept_run(starting_agent=starting_agent, input=input, context=context,
+                                                    max_turns=max_turns, hooks=hooks, run_config=run_config,
+                                                    previous_response_id=previous_response_id)
+        starting_agent = params["starting_agent"]
+        input = params["input"]
+        context = params["context"]
+        max_turns = params["max_turns"]
+        hooks = params["hooks"]
+        run_config = params["run_config"]
+        previous_response_id = params["previous_response_id"]
+
         if hooks is None:
             hooks = RunHooks[Any]()
         if run_config is None:
@@ -157,11 +169,11 @@ class Runner:
         tool_use_tracker = AgentToolUseTracker()
 
         with TraceCtxManager(
-            workflow_name=run_config.workflow_name,
-            trace_id=run_config.trace_id,
-            group_id=run_config.group_id,
-            metadata=run_config.trace_metadata,
-            disabled=run_config.tracing_disabled,
+                workflow_name=run_config.workflow_name,
+                trace_id=run_config.trace_id,
+                group_id=run_config.group_id,
+                metadata=run_config.trace_metadata,
+                disabled=run_config.tracing_disabled,
         ):
             current_turn = 0
             original_input: str | list[TResponseInputItem] = copy.deepcopy(input)
@@ -289,15 +301,15 @@ class Runner:
 
     @classmethod
     def run_sync(
-        cls,
-        starting_agent: Agent[TContext],
-        input: str | list[TResponseInputItem],
-        *,
-        context: TContext | None = None,
-        max_turns: int = DEFAULT_MAX_TURNS,
-        hooks: RunHooks[TContext] | None = None,
-        run_config: RunConfig | None = None,
-        previous_response_id: str | None = None,
+            cls,
+            starting_agent: Agent[TContext],
+            input: str | list[TResponseInputItem],
+            *,
+            context: TContext | None = None,
+            max_turns: int = DEFAULT_MAX_TURNS,
+            hooks: RunHooks[TContext] | None = None,
+            run_config: RunConfig | None = None,
+            previous_response_id: str | None = None,
     ) -> RunResult:
         """Run a workflow synchronously, starting at the given agent. Note that this just wraps the
         `run` method, so it will not work if there's already an event loop (e.g. inside an async
@@ -347,14 +359,14 @@ class Runner:
 
     @classmethod
     def run_streamed(
-        cls,
-        starting_agent: Agent[TContext],
-        input: str | list[TResponseInputItem],
-        context: TContext | None = None,
-        max_turns: int = DEFAULT_MAX_TURNS,
-        hooks: RunHooks[TContext] | None = None,
-        run_config: RunConfig | None = None,
-        previous_response_id: str | None = None,
+            cls,
+            starting_agent: Agent[TContext],
+            input: str | list[TResponseInputItem],
+            context: TContext | None = None,
+            max_turns: int = DEFAULT_MAX_TURNS,
+            hooks: RunHooks[TContext] | None = None,
+            run_config: RunConfig | None = None,
+            previous_response_id: str | None = None,
     ) -> RunResultStreaming:
         """Run a workflow starting at the given agent in streaming mode. The returned result object
         contains a method you can use to stream semantic events as they are generated.
@@ -444,13 +456,13 @@ class Runner:
 
     @classmethod
     async def _run_input_guardrails_with_queue(
-        cls,
-        agent: Agent[Any],
-        guardrails: list[InputGuardrail[TContext]],
-        input: str | list[TResponseInputItem],
-        context: RunContextWrapper[TContext],
-        streamed_result: RunResultStreaming,
-        parent_span: Span[Any],
+            cls,
+            agent: Agent[Any],
+            guardrails: list[InputGuardrail[TContext]],
+            input: str | list[TResponseInputItem],
+            context: RunContextWrapper[TContext],
+            streamed_result: RunResultStreaming,
+            parent_span: Span[Any],
     ):
         queue = streamed_result._input_guardrail_queue
 
@@ -487,15 +499,15 @@ class Runner:
 
     @classmethod
     async def _run_streamed_impl(
-        cls,
-        starting_input: str | list[TResponseInputItem],
-        streamed_result: RunResultStreaming,
-        starting_agent: Agent[TContext],
-        max_turns: int,
-        hooks: RunHooks[TContext],
-        context_wrapper: RunContextWrapper[TContext],
-        run_config: RunConfig,
-        previous_response_id: str | None,
+            cls,
+            starting_input: str | list[TResponseInputItem],
+            streamed_result: RunResultStreaming,
+            starting_agent: Agent[TContext],
+            max_turns: int,
+            hooks: RunHooks[TContext],
+            context_wrapper: RunContextWrapper[TContext],
+            run_config: RunConfig,
+            previous_response_id: str | None,
     ):
         if streamed_result.trace:
             streamed_result.trace.start(mark_as_current=True)
@@ -631,16 +643,16 @@ class Runner:
 
     @classmethod
     async def _run_single_turn_streamed(
-        cls,
-        streamed_result: RunResultStreaming,
-        agent: Agent[TContext],
-        hooks: RunHooks[TContext],
-        context_wrapper: RunContextWrapper[TContext],
-        run_config: RunConfig,
-        should_run_agent_start_hooks: bool,
-        tool_use_tracker: AgentToolUseTracker,
-        all_tools: list[Tool],
-        previous_response_id: str | None,
+            cls,
+            streamed_result: RunResultStreaming,
+            agent: Agent[TContext],
+            hooks: RunHooks[TContext],
+            context_wrapper: RunContextWrapper[TContext],
+            run_config: RunConfig,
+            should_run_agent_start_hooks: bool,
+            tool_use_tracker: AgentToolUseTracker,
+            all_tools: list[Tool],
+            previous_response_id: str | None,
     ) -> SingleStepResult:
         if should_run_agent_start_hooks:
             await asyncio.gather(
@@ -671,16 +683,16 @@ class Runner:
 
         # 1. Stream the output events
         async for event in model.stream_response(
-            system_prompt,
-            input,
-            model_settings,
-            all_tools,
-            output_schema,
-            handoffs,
-            get_model_tracing_impl(
-                run_config.tracing_disabled, run_config.trace_include_sensitive_data
-            ),
-            previous_response_id=previous_response_id,
+                system_prompt,
+                input,
+                model_settings,
+                all_tools,
+                output_schema,
+                handoffs,
+                get_model_tracing_impl(
+                    run_config.tracing_disabled, run_config.trace_include_sensitive_data
+                ),
+                previous_response_id=previous_response_id,
         ):
             if isinstance(event, ResponseCompletedEvent):
                 usage = (
@@ -726,18 +738,18 @@ class Runner:
 
     @classmethod
     async def _run_single_turn(
-        cls,
-        *,
-        agent: Agent[TContext],
-        all_tools: list[Tool],
-        original_input: str | list[TResponseInputItem],
-        generated_items: list[RunItem],
-        hooks: RunHooks[TContext],
-        context_wrapper: RunContextWrapper[TContext],
-        run_config: RunConfig,
-        should_run_agent_start_hooks: bool,
-        tool_use_tracker: AgentToolUseTracker,
-        previous_response_id: str | None,
+            cls,
+            *,
+            agent: Agent[TContext],
+            all_tools: list[Tool],
+            original_input: str | list[TResponseInputItem],
+            generated_items: list[RunItem],
+            hooks: RunHooks[TContext],
+            context_wrapper: RunContextWrapper[TContext],
+            run_config: RunConfig,
+            should_run_agent_start_hooks: bool,
+            tool_use_tracker: AgentToolUseTracker,
+            previous_response_id: str | None,
     ) -> SingleStepResult:
         # Ensure we run the hooks before anything else
         if should_run_agent_start_hooks:
@@ -786,19 +798,19 @@ class Runner:
 
     @classmethod
     async def _get_single_step_result_from_response(
-        cls,
-        *,
-        agent: Agent[TContext],
-        all_tools: list[Tool],
-        original_input: str | list[TResponseInputItem],
-        pre_step_items: list[RunItem],
-        new_response: ModelResponse,
-        output_schema: AgentOutputSchemaBase | None,
-        handoffs: list[Handoff],
-        hooks: RunHooks[TContext],
-        context_wrapper: RunContextWrapper[TContext],
-        run_config: RunConfig,
-        tool_use_tracker: AgentToolUseTracker,
+            cls,
+            *,
+            agent: Agent[TContext],
+            all_tools: list[Tool],
+            original_input: str | list[TResponseInputItem],
+            pre_step_items: list[RunItem],
+            new_response: ModelResponse,
+            output_schema: AgentOutputSchemaBase | None,
+            handoffs: list[Handoff],
+            hooks: RunHooks[TContext],
+            context_wrapper: RunContextWrapper[TContext],
+            run_config: RunConfig,
+            tool_use_tracker: AgentToolUseTracker,
     ) -> SingleStepResult:
         processed_response = RunImpl.process_model_response(
             agent=agent,
@@ -824,11 +836,11 @@ class Runner:
 
     @classmethod
     async def _run_input_guardrails(
-        cls,
-        agent: Agent[Any],
-        guardrails: list[InputGuardrail[TContext]],
-        input: str | list[TResponseInputItem],
-        context: RunContextWrapper[TContext],
+            cls,
+            agent: Agent[Any],
+            guardrails: list[InputGuardrail[TContext]],
+            input: str | list[TResponseInputItem],
+            context: RunContextWrapper[TContext],
     ) -> list[InputGuardrailResult]:
         if not guardrails:
             return []
@@ -862,11 +874,11 @@ class Runner:
 
     @classmethod
     async def _run_output_guardrails(
-        cls,
-        guardrails: list[OutputGuardrail[TContext]],
-        agent: Agent[TContext],
-        agent_output: Any,
-        context: RunContextWrapper[TContext],
+            cls,
+            guardrails: list[OutputGuardrail[TContext]],
+            agent: Agent[TContext],
+            agent_output: Any,
+            context: RunContextWrapper[TContext],
     ) -> list[OutputGuardrailResult]:
         if not guardrails:
             return []
@@ -900,17 +912,17 @@ class Runner:
 
     @classmethod
     async def _get_new_response(
-        cls,
-        agent: Agent[TContext],
-        system_prompt: str | None,
-        input: list[TResponseInputItem],
-        output_schema: AgentOutputSchemaBase | None,
-        all_tools: list[Tool],
-        handoffs: list[Handoff],
-        context_wrapper: RunContextWrapper[TContext],
-        run_config: RunConfig,
-        tool_use_tracker: AgentToolUseTracker,
-        previous_response_id: str | None,
+            cls,
+            agent: Agent[TContext],
+            system_prompt: str | None,
+            input: list[TResponseInputItem],
+            output_schema: AgentOutputSchemaBase | None,
+            all_tools: list[Tool],
+            handoffs: list[Handoff],
+            context_wrapper: RunContextWrapper[TContext],
+            run_config: RunConfig,
+            tool_use_tracker: AgentToolUseTracker,
+            previous_response_id: str | None,
     ) -> ModelResponse:
         model = cls._get_model(agent, run_config)
         model_settings = agent.model_settings.resolve(run_config.model_settings)
@@ -958,6 +970,9 @@ class Runner:
 
     @classmethod
     def _get_model(cls, agent: Agent[Any], run_config: RunConfig) -> Model:
+        model = RunInterceptor.get().get_model(agent, run_config)
+        if model is not None:
+            return model
         if isinstance(run_config.model, Model):
             return run_config.model
         elif isinstance(run_config.model, str):

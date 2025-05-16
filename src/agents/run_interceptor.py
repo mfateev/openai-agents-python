@@ -3,29 +3,55 @@ import time
 import uuid
 from abc import ABC
 from datetime import datetime
-from operator import truediv
 from random import Random
+from typing import Any
 from uuid import UUID
 
-from src.agents import Model
+from agents import Agent, TContext, TResponseInputItem, RunHooks, RunConfig
 
-_side_effects_interceptor: contextvars.ContextVar["SideEffectsInterceptor"] = contextvars.ContextVar(
-    "side_effects_interceptor", default=DefaultSideEffectsInterceptor()
-)
+from src.agents import Model, Runner
+
+# Initialized to the DefaultRunInterceptor at the bottom of the file to avoid a circular import
+_run_interceptor: contextvars.ContextVar["RunInterceptor"] = contextvars.ContextVar(
+    "run_interceptor")
 
 
-class SideEffectsInterceptor(ABC):
+class RunInterceptor(ABC):
     """
-    Intercepts side effects in the agent's actions.
+    Intercepts parameters of Runner.run() as well as side effect calls like time, random, uuid4, etc.
     """
 
     @classmethod
-    def get(cls) -> "SideEffectsInterceptor":
-        return _side_effects_interceptor.get()
+    def get(cls) -> "RunInterceptor":
+        return _run_interceptor.get()
 
     @classmethod
-    def set_interceptor(cls, interceptor: "SideEffectsInterceptor") -> "contextvars.Token[SideEffectsInterceptor]":
-        return _side_effects_interceptor.set(interceptor)
+    def set_interceptor(cls, interceptor: "RunInterceptor") -> "contextvars.Token[RunInterceptor]":
+        return _run_interceptor.set(interceptor)
+
+    def intercept_run(self,
+                      starting_agent: Agent[TContext],
+                      input: str | list[TResponseInputItem],
+                      context: TContext | None,
+                      max_turns: int,
+                      hooks: RunHooks[TContext] | None,
+                      run_config: RunConfig | None,
+                      previous_response_id: str | None) -> dict[str, Any]:
+        return {
+            starting_agent: starting_agent,
+            input: input,
+            context: context,
+            max_turns: max_turns,
+            hooks: hooks,
+            run_config: run_config,
+            previous_response_id: previous_response_id,
+        }
+
+    def get_model(self, agent: Agent[Any], run_config: RunConfig) -> Model | None:
+        """
+        Returns the current model.
+        """
+        pass
 
     def random(self) -> Random:
         pass
@@ -51,12 +77,6 @@ class SideEffectsInterceptor(ABC):
     def uuid4(self) -> UUID:
         """
         Returns a random UUID4.
-        """
-        pass
-
-    def get_model(self, model: str) -> Model | None:
-        """
-        Returns the current model.
         """
         pass
 
@@ -95,7 +115,7 @@ class SideEffectsInterceptor(ABC):
         pass
 
 
-class _DefaultSideEffectsInterceptor(SideEffectsInterceptor):
+class DefaultRunInterceptor(RunInterceptor):
     """
     Default implementation of SideEffectsInterceptor.
     """
@@ -112,7 +132,7 @@ class _DefaultSideEffectsInterceptor(SideEffectsInterceptor):
     def uuid4(self) -> UUID:
         return uuid.uuid4()
 
-    def get_model(self, model: str) -> Model | None:
+    def get_model(self, agent: Agent[Any], run_config: RunConfig) -> Model | None:
         return None
 
     def patched(self, id: str) -> bool:
@@ -121,26 +141,32 @@ class _DefaultSideEffectsInterceptor(SideEffectsInterceptor):
     def deprecate_patch(id: str) -> None:
         return
 
+    def intercept_agent(self, agent: Agent) -> Agent:
+        return agent
+
 
 def _safe_random() -> Random:
-    return SideEffectsInterceptor.get().random()
+    return RunInterceptor.get().random()
 
 
 def _safe_time(tz=None) -> float:
-    return SideEffectsInterceptor.get().time(tz)
+    return RunInterceptor.get().time(tz)
 
 
 def _safe_time_ns() -> int:
-    return SideEffectsInterceptor.get().time_ns()
+    return RunInterceptor.get().time_ns()
 
 
 def _safe_uuid4() -> UUID:
-    return SideEffectsInterceptor.get().uuid4()
+    return RunInterceptor.get().uuid4()
 
 
 def _patched(id: str) -> bool:
-    return SideEffectsInterceptor.get().patched(id)
+    return RunInterceptor.get().patched(id)
 
 
 def _deprecate_patch(id: str) -> None:
-    SideEffectsInterceptor.get().deprecate_patch(id)
+    RunInterceptor.get().deprecate_patch(id)
+
+
+_run_interceptor.set(DefaultRunInterceptor())
