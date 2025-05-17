@@ -50,6 +50,8 @@ class RunInterceptor(ABC):
     def get_model(self, agent: Agent[Any], run_config: RunConfig) -> Model | None:
         """
         Returns the current model.
+        TODO:   Is this needed given that intercept_run.starting_agent contains the model field
+                as well as run_config.model and run_config.model_provider?
         """
         pass
 
